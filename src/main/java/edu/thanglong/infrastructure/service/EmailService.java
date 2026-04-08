@@ -15,8 +15,8 @@ public class EmailService {
 
     public void sendOtp(String toEmail, String otp, String subject) {
         if (mailSender == null) {
-            log.warn("JavaMailSender chưa được cấu hình — OTP: {}", otp);
-            return;
+            log.error("JavaMailSender chưa được cấu hình");
+            throw new RuntimeException("Không thể gửi email, vui lòng thử lại sau");
         }
         try {
             SimpleMailMessage message = new SimpleMailMessage();
@@ -28,7 +28,8 @@ public class EmailService {
             mailSender.send(message);
             log.info("Gửi OTP thành công tới: {}", toEmail);
         } catch (Exception e) {
-            log.error("Gửi email thất bại tới {}: {}", toEmail, e.getMessage());
+            // Log lỗi gốc đầy đủ để debug
+            log.error("Gửi email thất bại tới {} — Nguyên nhân: {}", toEmail, e.getMessage(), e);
             throw new RuntimeException("Không thể gửi email, vui lòng thử lại sau");
         }
     }

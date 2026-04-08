@@ -8,4 +8,5 @@ public interface UserVoucherRepository {
     UserVoucher save(UserVoucher userVoucher);
     List<UserVoucher> findByUserId(String userId);
     Optional<UserVoucher> findByUserIdAndDiscountId(String userId, String discountId);
+	boolean existsByUserIdAndDiscountId(String userId, String discountId);
 }
