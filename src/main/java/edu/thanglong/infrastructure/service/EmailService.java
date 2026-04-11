@@ -2,6 +2,7 @@ package edu.thanglong.infrastructure.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
@@ -13,6 +14,9 @@ public class EmailService {
     @Autowired(required = false)
     private JavaMailSender mailSender;
 
+    @Value("${mail.from}")
+    private String fromEmail;
+
     public void sendOtp(String toEmail, String otp, String subject) {
         if (mailSender == null) {
             log.error("JavaMailSender chưa được cấu hình");
@@ -20,6 +24,7 @@ public class EmailService {
         }
         try {
             SimpleMailMessage message = new SimpleMailMessage();
+            message.setFrom(fromEmail);  // trungkienpxa@gmail.com — đã verify trên Brevo
             message.setTo(toEmail);
             message.setSubject(subject);
             message.setText("Mã OTP của bạn là: " + otp
@@ -28,8 +33,8 @@ public class EmailService {
             mailSender.send(message);
             log.info("Gửi OTP thành công tới: {}", toEmail);
         } catch (Exception e) {
-            // Log lỗi gốc đầy đủ để debug
-            log.error("Gửi email thất bại tới {} — Nguyên nhân: {}", toEmail, e.getMessage(), e);
+            log.error("Gửi email thất bại tới {} — Nguyên nhân: {}",
+                toEmail, e.getMessage(), e);
             throw new RuntimeException("Không thể gửi email, vui lòng thử lại sau");
         }
     }
