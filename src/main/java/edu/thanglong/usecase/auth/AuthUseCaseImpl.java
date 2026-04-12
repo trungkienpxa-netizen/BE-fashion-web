@@ -2,15 +2,14 @@ package edu.thanglong.usecase.auth;
 
 import edu.thanglong.domain.exception.BusinessRuleException;
 import edu.thanglong.domain.exception.ResourceNotFoundException;
-import edu.thanglong.domain.model.OtpToken;
-import edu.thanglong.domain.model.User;
-import edu.thanglong.domain.repository.OtpTokenRepository;
-import edu.thanglong.domain.repository.UserRepository;
+import edu.thanglong.domain.model.*;
+import edu.thanglong.domain.repository.*;
 import edu.thanglong.infrastructure.service.EmailService;
 import edu.thanglong.presentation.dto.request.*;
 import edu.thanglong.presentation.dto.response.AuthResponse;
 import edu.thanglong.presentation.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
@@ -20,24 +19,23 @@ import java.util.Random;
 @RequiredArgsConstructor
 public class AuthUseCaseImpl implements AuthUseCase {
 
-    private final UserRepository      userRepository;
-    private final OtpTokenRepository  otpTokenRepository;
-    private final PasswordEncoder     passwordEncoder;
-    private final JwtTokenProvider    jwtTokenProvider;
-    private final EmailService        emailService;
+    private final UserRepository         userRepository;
+    private final OtpTokenRepository     otpTokenRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
+    private final PasswordEncoder        passwordEncoder;
+    private final JwtTokenProvider       jwtTokenProvider;
+    private final EmailService           emailService;
+
+    @Value("${jwt.refresh-expiration-ms:604800000}")
+    private long refreshExpirationMs;   // 7 ngày
 
     // ─── Gửi OTP đăng ký ────────────────────────────────────
     @Override
     public void sendRegisterOtp(SendOtpRequest req) {
         if (userRepository.existsByEmail(req.getEmail()))
             throw new BusinessRuleException("Email đã được sử dụng: " + req.getEmail());
-
-        issueOtp(req.getEmail(), OtpToken.OtpType.REGISTER);
-        emailService.sendOtp(req.getEmail(),
-            otpTokenRepository
-                .findLatestByEmailAndType(req.getEmail(), OtpToken.OtpType.REGISTER)
-                .map(OtpToken::getOtp).orElseThrow(),
-            "Mã OTP xác thực đăng ký tài khoản");
+        String otp = issueOtp(req.getEmail(), OtpToken.OtpType.REGISTER);
+        emailService.sendOtp(req.getEmail(), otp, "Mã OTP xác thực đăng ký tài khoản");
     }
 
     // ─── Đăng ký ────────────────────────────────────────────
@@ -60,7 +58,6 @@ public class AuthUseCaseImpl implements AuthUseCase {
 
         User saved = userRepository.save(user);
         otpTokenRepository.deleteByEmailAndType(req.getEmail(), OtpToken.OtpType.REGISTER);
-
         return buildAuthResponse(saved);
     }
 
@@ -76,19 +73,50 @@ public class AuthUseCaseImpl implements AuthUseCase {
         if (user.getStatus() == User.Status.INACTIVE)
             throw new BusinessRuleException("Tài khoản đã bị vô hiệu hóa");
 
+        // Xóa refresh token cũ
+        refreshTokenRepository.deleteByUserId(user.getId());
         return buildAuthResponse(user);
     }
 
-    // ─── Quên mật khẩu — gửi OTP ────────────────────────────
+    // ─── Refresh Token ───────────────────────────────────────
+    @Override
+    public AuthResponse refreshToken(String refreshTokenValue) {
+        RefreshToken refreshToken = refreshTokenRepository.findByToken(refreshTokenValue)
+                .orElseThrow(() -> new BusinessRuleException("Refresh token không hợp lệ"));
+
+        if (refreshToken.isRevoked())
+            throw new BusinessRuleException("Refresh token đã bị thu hồi");
+
+        if (refreshToken.isExpired()) {
+            refreshTokenRepository.deleteByUserId(refreshToken.getUserId());
+            throw new BusinessRuleException("Refresh token đã hết hạn, vui lòng đăng nhập lại");
+        }
+
+        User user = userRepository.findById(refreshToken.getUserId())
+                .orElseThrow(() -> new ResourceNotFoundException("User", refreshToken.getUserId()));
+
+        if (user.getStatus() == User.Status.INACTIVE)
+            throw new BusinessRuleException("Tài khoản đã bị vô hiệu hóa");
+
+        // Thu hồi refresh token cũ, tạo mới
+        refreshToken.setRevoked(true);
+        refreshTokenRepository.save(refreshToken);
+
+        return buildAuthResponse(user);
+    }
+
+    // ─── Logout ─────────────────────────────────────────────
+    @Override
+    public void logout(String userId) {
+        refreshTokenRepository.revokeAllByUserId(userId);
+    }
+
+    // ─── Quên mật khẩu ──────────────────────────────────────
     @Override
     public void forgotPassword(ForgotPasswordRequest req) {
-        // Không tiết lộ email tồn tại hay không vì lý do bảo mật
         userRepository.findByEmail(req.getEmail()).ifPresent(user -> {
-            issueOtp(req.getEmail(), OtpToken.OtpType.FORGOT_PASSWORD);
-            otpTokenRepository
-                .findLatestByEmailAndType(req.getEmail(), OtpToken.OtpType.FORGOT_PASSWORD)
-                .ifPresent(otp -> emailService.sendOtp(
-                    req.getEmail(), otp.getOtp(), "Mã OTP đặt lại mật khẩu"));
+            String otp = issueOtp(req.getEmail(), OtpToken.OtpType.FORGOT_PASSWORD);
+            emailService.sendOtp(req.getEmail(), otp, "Mã OTP đặt lại mật khẩu");
         });
     }
 
@@ -103,9 +131,10 @@ public class AuthUseCaseImpl implements AuthUseCase {
         user.setPasswordHash(passwordEncoder.encode(req.getNewPassword()));
         userRepository.save(user);
         otpTokenRepository.deleteByEmailAndType(req.getEmail(), OtpToken.OtpType.FORGOT_PASSWORD);
+        refreshTokenRepository.deleteByUserId(user.getId());
     }
 
-    // ─── Đổi mật khẩu (đã đăng nhập) ───────────────────────
+    // ─── Đổi mật khẩu ───────────────────────────────────────
     @Override
     public void changePassword(String userId, ChangePasswordRequest req) {
         User user = userRepository.findById(userId)
@@ -119,10 +148,11 @@ public class AuthUseCaseImpl implements AuthUseCase {
 
         user.setPasswordHash(passwordEncoder.encode(req.getNewPassword()));
         userRepository.save(user);
+        refreshTokenRepository.deleteByUserId(userId);
     }
 
     // ─── Helpers ─────────────────────────────────────────────
-    private void issueOtp(String email, OtpToken.OtpType type) {
+    private String issueOtp(String email, OtpToken.OtpType type) {
         otpTokenRepository.deleteByEmailAndType(email, type);
         String otp = String.format("%06d", new Random().nextInt(1_000_000));
         otpTokenRepository.save(OtpToken.builder()
@@ -132,16 +162,15 @@ public class AuthUseCaseImpl implements AuthUseCase {
                 .expiredAt(LocalDateTime.now().plusMinutes(5))
                 .used(false)
                 .build());
+        return otp;
     }
 
     private void verifyOtp(String email, String inputOtp, OtpToken.OtpType type) {
         OtpToken token = otpTokenRepository.findLatestByEmailAndType(email, type)
                 .orElseThrow(() -> new BusinessRuleException("OTP không hợp lệ"));
 
-        if (token.isUsed())
-            throw new BusinessRuleException("OTP đã được sử dụng");
-        if (token.isExpired())
-            throw new BusinessRuleException("OTP đã hết hạn");
+        if (token.isUsed())    throw new BusinessRuleException("OTP đã được sử dụng");
+        if (token.isExpired()) throw new BusinessRuleException("OTP đã hết hạn");
         if (!token.getOtp().equals(inputOtp))
             throw new BusinessRuleException("OTP không đúng");
 
@@ -150,8 +179,20 @@ public class AuthUseCaseImpl implements AuthUseCase {
     }
 
     private AuthResponse buildAuthResponse(User user) {
+        String accessToken  = jwtTokenProvider.generateAccessToken(
+            user.getId(), user.getRole().name());
+        String refreshToken = jwtTokenProvider.generateRefreshToken();
+
+        refreshTokenRepository.save(RefreshToken.builder()
+                .userId(user.getId())
+                .token(refreshToken)
+                .expiredAt(LocalDateTime.now().plusSeconds(refreshExpirationMs / 1000))
+                .revoked(false)
+                .build());
+
         return AuthResponse.builder()
-                .token(jwtTokenProvider.generate(user.getId(), user.getRole().name()))
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
                 .userId(user.getId())
                 .email(user.getEmail())
                 .fullName(user.getFullName())

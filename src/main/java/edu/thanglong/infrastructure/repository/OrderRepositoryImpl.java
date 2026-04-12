@@ -6,6 +6,7 @@ import edu.thanglong.infrastructure.mapper.OrderMapper;
 import edu.thanglong.infrastructure.repository.mongo.OrderMongoRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Repository;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,18 +29,21 @@ public class OrderRepositoryImpl implements OrderRepository {
 
     @Override
     public List<Order> findByUserId(String userId) {
-        return mongo.findByUserId(userId).stream()
-                .map(mapper::toDomain).toList();
+        return mongo.findByUserId(userId).stream().map(mapper::toDomain).toList();
     }
 
     @Override
     public List<Order> findByStatus(Order.OrderStatus status) {
-        return mongo.findByStatus(status).stream()
-                .map(mapper::toDomain).toList();
+        return mongo.findByStatus(status).stream().map(mapper::toDomain).toList();
     }
 
     @Override
     public List<Order> findAll() {
         return mongo.findAll().stream().map(mapper::toDomain).toList();
+    }
+
+    @Override
+    public List<Order> findByCreatedAtBetween(LocalDateTime from, LocalDateTime to) {
+        return mongo.findByCreatedAtBetween(from, to).stream().map(mapper::toDomain).toList();
     }
 }

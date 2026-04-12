@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import java.nio.charset.StandardCharsets;
 import java.security.Key;
 import java.util.Date;
+import java.util.UUID;
 
 @Component
 @RequiredArgsConstructor
@@ -21,14 +22,19 @@ public class JwtTokenProvider {
         );
     }
 
-    public String generate(String userId, String role) {
+    public String generateAccessToken(String userId, String role) {
         return Jwts.builder()
                 .subject(userId)
                 .claim("role", role)
+                .claim("type", "ACCESS")
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + jwtConfig.getExpirationMs()))
                 .signWith(getKey())
                 .compact();
+    }
+
+    public String generateRefreshToken() {
+        return UUID.randomUUID().toString();
     }
 
     public String extractUserId(String token) {

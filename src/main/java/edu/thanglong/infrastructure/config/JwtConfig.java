@@ -11,4 +11,5 @@ import org.springframework.context.annotation.Configuration;
 public class JwtConfig {
     private String secret;
     private long expirationMs;
+    private long refreshExpirationMs; // 7 ngày
 }

@@ -4,9 +4,6 @@ import edu.thanglong.presentation.dto.request.*;
 import edu.thanglong.presentation.dto.response.ApiResponse;
 import edu.thanglong.presentation.dto.response.AuthResponse;
 import edu.thanglong.usecase.auth.AuthUseCase;
-import jakarta.servlet.http.Cookie;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -26,24 +23,24 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    public ApiResponse<AuthResponse> register(@Valid @RequestBody RegisterRequest request,
-                                              HttpServletResponse response) {
-        AuthResponse auth = authUseCase.register(request);
-        setTokenCookie(response, auth.getToken());
-        return ApiResponse.success(auth);
+    public ApiResponse<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+        return ApiResponse.success(authUseCase.register(request));
     }
 
     @PostMapping("/login")
-    public ApiResponse<AuthResponse> login(@Valid @RequestBody LoginRequest request,
-                                           HttpServletResponse response) {
-        AuthResponse auth = authUseCase.login(request);
-        setTokenCookie(response, auth.getToken());
-        return ApiResponse.success(auth);
+    public ApiResponse<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
+        return ApiResponse.success(authUseCase.login(request));
+    }
+
+    @PostMapping("/refresh-token")
+    public ApiResponse<AuthResponse> refreshToken(
+            @Valid @RequestBody RefreshTokenRequest request) {
+        return ApiResponse.success(authUseCase.refreshToken(request.getRefreshToken()));
     }
 
     @PostMapping("/logout")
-    public ApiResponse<Void> logout(HttpServletResponse response) {
-        clearTokenCookie(response);
+    public ApiResponse<Void> logout(Authentication authentication) {
+        authUseCase.logout((String) authentication.getPrincipal());
         return ApiResponse.success(null);
     }
 
@@ -64,23 +61,5 @@ public class AuthController {
                                             @Valid @RequestBody ChangePasswordRequest request) {
         authUseCase.changePassword((String) authentication.getPrincipal(), request);
         return ApiResponse.success(null);
-    }
-
-    // ─── Helpers ────────────────────────────────────────────
-    private void setTokenCookie(HttpServletResponse response, String token) {
-        Cookie cookie = new Cookie("jwt", token);
-        cookie.setHttpOnly(true);   // JS không đọc được — chống XSS
-        cookie.setSecure(false);    // đổi thành true khi dùng HTTPS
-        cookie.setPath("/");
-        cookie.setMaxAge(24 * 60 * 60); // 1 ngày, khớp với jwtConfig.expirationMs
-        response.addCookie(cookie);
-    }
-
-    private void clearTokenCookie(HttpServletResponse response) {
-        Cookie cookie = new Cookie("jwt", "");
-        cookie.setHttpOnly(true);
-        cookie.setPath("/");
-        cookie.setMaxAge(0);        // xóa cookie ngay lập tức
-        response.addCookie(cookie);
     }
 }
